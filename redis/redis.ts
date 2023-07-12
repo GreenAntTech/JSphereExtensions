@@ -9,7 +9,7 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     redisPassword = (config.settings.redisPassword as IObject).value as string;
     if (redisHost && redisPassword) {
         try {
-            if ((config.settings.redisPassword as IObject).encrypted) redisPassword = await utils.decrypt(redisPassword);
+            if ((config.settings.redisPassword as IObject).encrypt) redisPassword = await utils.decrypt(redisPassword);
             const client = await connect({
                 hostname: redisHost,
                 port: redisPort,

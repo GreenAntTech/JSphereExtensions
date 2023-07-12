@@ -13,7 +13,7 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     password = (config.settings.dbPassword as IObject).value as string;
     if (hostname && database && username && password) {
         try {
-            if ((config.settings.dbPassword as IObject).encrypted) password = await utils.decrypt(password);
+            if ((config.settings.dbPassword as IObject).encrypt) password = await utils.decrypt(password);
             const authToken = neo4j.auth.basic(username, password);
             const driver = neo4j.driver(hostname, authToken);
             driver.verifyConnectivity();
