@@ -1,4 +1,4 @@
-import type { ContextExtensionConfig, IUtils, ICache, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
+import type { ContextExtensionConfig, IUtils, ICache, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import { connect, Redis } from "https://deno.land/x/redis@v0.29.2/mod.ts";
 

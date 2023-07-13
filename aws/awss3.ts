@@ -1,4 +1,4 @@
-import type { ContextExtensionConfig, IUtils, IStorage, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
+import type { ContextExtensionConfig, IUtils, IStorage, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import {
     S3Client,

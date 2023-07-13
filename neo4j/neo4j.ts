@@ -1,4 +1,4 @@
-import type { ContextExtensionConfig, IUtils, IDataStore, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
+import type { ContextExtensionConfig, IUtils, IDataStore, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
 import type { Driver, Session, Transaction, Result, QueryResult } from "https://deno.land/x/neo4j_lite_client@4.4.1-preview2/mod.ts";    
 import neo4j from "https://deno.land/x/neo4j_lite_client@4.4.1-preview2/mod.ts";    
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
