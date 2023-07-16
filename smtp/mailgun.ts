@@ -1,7 +1,6 @@
 import type { ContextExtensionConfig, IUtils, IMail, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
-import { Base64 } from "../../JSphereDev/deps.ts";
-export * as Base64 from 'https://deno.land/std@0.119.0/encoding/base64.ts';
+import * as Base64 from 'https://deno.land/std@0.119.0/encoding/base64.ts';
 
 export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<IMail|void> {
     let smtpHost = '', smtpUsername = '', smtpPassword = '';
