@@ -17,8 +17,8 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     s3SecretAccessKey = (config.settings.s3SecretAccessKey as IObject).value as string;
     if (s3Region && s3AccessKeyId && s3SecretAccessKey) {
         try {
-            if ((config.settings.s3AccessKeyId as IObject).encrypt) s3AccessKeyId = await utils.decrypt(s3AccessKeyId);
-            if ((config.settings.s3SecretAccessKey as IObject).encrypt) s3SecretAccessKey = await utils.decrypt(s3SecretAccessKey);
+            if ((config.settings.s3AccessKeyId as IObject).encrypted) s3AccessKeyId = await utils.decrypt(s3AccessKeyId);
+            if ((config.settings.s3SecretAccessKey as IObject).encrypted) s3SecretAccessKey = await utils.decrypt(s3SecretAccessKey);
             const client = new S3Client({
                 region: s3Region,
                 credentials: {

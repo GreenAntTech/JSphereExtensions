@@ -9,7 +9,7 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     smtpPassword = (config.settings.smtpPassword as IObject).value as string;
     if (smtpHost && smtpUsername && smtpPassword) {
         try {
-            if ((config.settings.smtpPassword as IObject).encrypt) smtpPassword = await utils.decrypt(smtpPassword);
+            if ((config.settings.smtpPassword as IObject).encrypted) smtpPassword = await utils.decrypt(smtpPassword);
             log.info('SMTP: Client connection created.');
             return new MailClient(smtpHost, smtpUsername, smtpPassword);
         }
