@@ -12,6 +12,7 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
             if ((config.settings.keyId as IObject).encrypted) keyId = await utils.decrypt(keyId);
             if ((config.settings.privateKey as IObject).encrypted) privateKey = await utils.decrypt(privateKey);
             const storage = new Storage(config); 
+            await storage.connect();
             log.info('GCP Storage: Client connection created.');
             return storage;
         }
