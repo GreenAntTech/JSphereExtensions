@@ -1,3 +1,12 @@
+/*
+    Reference Material:
+        https://developers.google.com/identity/protocols/oauth2/service-account#callinganapi
+        https://cloud.google.com/storage/docs/json_api
+        https://cloud.google.com/blog/products/storage-data-transfer/understanding-new-cloud-storage-hierarchical-namespace
+        https://github.com/Zaubrik/djwt
+        https://jwt.io/
+*/
+
 import type { ContextExtensionConfig, IUtils, IStorage, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
@@ -11,13 +20,13 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
         try {
             if ((config.settings.keyId as IObject).encrypted) keyId = await utils.decrypt(keyId);
             if ((config.settings.privateKey as IObject).encrypted) privateKey = await utils.decrypt(privateKey);
-            const storage = new Storage(config); 
+            const storage = new Storage({ bucket, keyId, privateKey }); 
             await storage.connect();
             log.info('GCP Storage: Client connection created.');
             return storage;
         }
         catch(e) {
-            log.error(`GCP Storage: Client connection failed.`, e.message);
+            log.error(`GCP Storage: Client connection failed.`, e);
         }
     }
     else log.error('GCP Storage: One or more required parameters (bucket, keyId, privateKey) have not been set.');
@@ -34,13 +43,13 @@ class Storage implements IStorage {
     }
 
     async connect () : Promise<void> {
-        const privateKey = await importPrivateKey(this.config.settings.privateKey);
+        const privateKey = await importPrivateKey(this.config.privateKey);
         const date = Date.now() / 1000;
 
         const header = {
             "alg": "RS256",
             "typ": "JWT",
-            "kid": this.config.settings.keyId
+            "kid": this.config.keyId
         };
     
         const claimSet = {
@@ -52,7 +61,7 @@ class Storage implements IStorage {
         }; 
         
         const jwt = await create(header, claimSet, privateKey);
-    
+
         let response = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: [['Content-Type', 'application/x-www-form-urlencoded']],
@@ -69,69 +78,70 @@ class Storage implements IStorage {
         this.tokenLife = json['expires_in'];
         this.tokenType = json['token_type'];
 
-        setTimeout(() => { this.connect() }, (this.tokenLife - 300) * 1000);
+        setTimeout(async () => { await this.connect() }, (this.tokenLife - 300) * 1000);
     }
 
     async createFolder (name:string) : Promise<void> {
         const body = {
-            name
+            name,
         }
 
-        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.settings.bucket}/folders?recursive=true`, {
+        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/folders?recursive=true`, {
             headers: {
-                'Content-Type': 'text/plain',
+                'Content-Type': 'application/json',
                 Authorization: `${this.tokenType} ${this.token}`
             },
             method: 'POST',
             body: JSON.stringify(body)
         })
-    
+
         const json = await response.json();
 
         if (json.error) {
             throw json.error.code + ':' + json.error.message;
-        }    
+        }
+        
+        return json;
     }
 
     async putItem (params:IObject) : Promise<void> {
-        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.settings.bucket}/o`, {
+        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.bucket}/o?name=${params.name}&uploadType=media`, {
             headers: {
                 'Content-Type': params.contentType,
                 'Content-Length': params.content.length,
                 Authorization: `${this.tokenType} ${this.token}`
             },
             method: 'POST',
-            body: JSON.stringify(params.content)
+            body: params.content
         })
     
         const json = await response.json();
 
         if (json.error) {
             throw json.error.code + ':' + json.error.message;
-        }    
+        }
     }
 
     async getItem (path:string) : Promise<Uint8Array> {
-        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.settings.bucket}/o/${path}?alt=media`, {
+        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/o/${encodeURIComponent(path)}?alt=media`, {
             headers: {
                 Authorization: `${this.tokenType} ${this.token}`
             },
             method: 'GET'
         })
-
-        if (response.ok) return await response.arrayBuffer() as Uint8Array;
-
+        console.log(response)
+        const content = await response.arrayBuffer() as Uint8Array;
+        if (response.ok) return content;
         throw response.status + ':' + response.statusText;
     }
 
     async deleteItem (path:string) : Promise<void> {
-        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.settings.bucket}/o/${path}`, {
+        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/o/${encodeURIComponent(path)}`, {
             headers: {
                 Authorization: `${this.tokenType} ${this.token}`
             },
             method: 'DELETE'
         })
-
         if (!response.ok) throw response.status + ':' + response.statusText;
     }
 }
