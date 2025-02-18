@@ -1,4 +1,4 @@
-import type { ContextExtensionConfig, IUtils, IStorage, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import {
     S3Client,
@@ -10,15 +10,13 @@ import {
     readableStreamToUint8Array
 } from "./aws-s3-client.ts";
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<IStorage|void> {
+export function getInstance (config: IObject) : Storage|void {
     let s3Region = '', s3AccessKeyId = '', s3SecretAccessKey = '';
-    s3Region = config.settings.s3Region as string;
-    s3AccessKeyId = (config.settings.s3AccessKeyId as IObject).value as string;
-    s3SecretAccessKey = (config.settings.s3SecretAccessKey as IObject).value as string;
+    s3Region = (config.settings as IObject).s3Region as string;
+    s3AccessKeyId = (config.settings as IObject).s3AccessKeyId as string;
+    s3SecretAccessKey = (config.settings as IObject).s3SecretAccessKey as string;
     if (s3Region && s3AccessKeyId && s3SecretAccessKey) {
         try {
-            if ((config.settings.s3AccessKeyId as IObject).encrypted) s3AccessKeyId = await utils.decrypt(s3AccessKeyId);
-            if ((config.settings.s3SecretAccessKey as IObject).encrypted) s3SecretAccessKey = await utils.decrypt(s3SecretAccessKey);
             const client = new S3Client({
                 region: s3Region,
                 credentials: {
@@ -36,17 +34,17 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     else log.error('AWS S3: One or more required parameters (s3Region, s3AccessKeyId, s3SecretAccessKey) have not been set.');
 }
 
-class Storage implements IStorage {
+class Storage {
+    private config: IObject;
     private client: typeof S3Client;
-    private config: ContextExtensionConfig
 
-    constructor(client: typeof S3Client, config: ContextExtensionConfig) {
+    constructor(client: typeof S3Client, config: IObject) {
         this.client = client;
         this.config = config;
     }
 
     async create () : Promise<void> {
-        const bucket = this.config.settings.s3BucketNamePrefix + this.config.appId.toLowerCase()
+        const bucket = (this.config.s3BucketNamePrefix as string) + (this.config.appId as string).toLowerCase()
         await this.client.send(
             new CreateBucketCommand({
                 Bucket: bucket
@@ -55,7 +53,7 @@ class Storage implements IStorage {
     }
 
     async put (key: string, file: Uint8Array, contentType: string) : Promise<void> {
-        const bucket = this.config.settings.s3BucketNamePrefix + this.config.appId.toLowerCase()
+        const bucket = (this.config.s3BucketNamePrefix as string) + (this.config.appId as string).toLowerCase()
         await this.client.send(
             new PutObjectCommand({
                 Bucket: bucket,
@@ -68,7 +66,7 @@ class Storage implements IStorage {
     }
 
     async get (key: string) : Promise<Uint8Array> {
-        const bucket = this.config.settings.s3BucketNamePrefix + this.config.appId.toLowerCase()
+        const bucket = (this.config.s3BucketNamePrefix as string) + (this.config.appId as string).toLowerCase()
         const { Body } = await this.client.send(
             new GetObjectCommand({
                 Bucket: bucket,
@@ -82,7 +80,7 @@ class Storage implements IStorage {
         // todo: This try catch is to nullify an error that is thrown but doesn't stop the file from being deleted
         // error: TypeError: Cannot read properties of null (reading 'getReader')
         try {
-            const bucket = this.config.settings.s3BucketNamePrefix + this.config.appId.toLowerCase()
+            const bucket = (this.config.s3BucketNamePrefix as string) + (this.config.appId as string).toLowerCase()
             await this.client.send(
                 new DeleteObjectCommand({
                     Bucket: bucket,
@@ -96,7 +94,7 @@ class Storage implements IStorage {
     }
 
     async copy (source: string, key: string) {
-        const bucket = this.config.settings.s3BucketNamePrefix + this.config.appId.toLowerCase()
+        const bucket = (this.config.s3BucketNamePrefix as string) + (this.config.appId as string).toLowerCase()
         await this.client.send(
             new CopyObjectCommand({
                 CopySource: `${bucket}/${source}`,

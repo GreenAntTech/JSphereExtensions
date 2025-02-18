@@ -7,20 +7,19 @@
         https://jwt.io/
 */
 
-import type { ContextExtensionConfig, IUtils, IStorage, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
-import { create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
+import { decode } from "https://deno.land/std@0.179.0/encoding/hex.ts";
+import { create, Header, Payload } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<IStorage|void> {
-    let bucket = '', keyId = '', privateKey = '';
-    bucket = config.settings.bucket as string;
-    keyId = (config.settings.keyId as IObject).value as string;
-    privateKey = (config.settings.privateKey as IObject).value as string;
-    if (bucket && keyId && privateKey) {
+export async function getInstance (config: IObject) : Promise<Storage|void> {
+    let bucket = '', keyId = '', privateKeyEnvVar = '';
+    bucket = (config.settings as IObject).bucket as string;
+    keyId = (config.settings as IObject).keyId as string;
+    privateKeyEnvVar = (config.settings as IObject).privateKeyEnvVar as string;
+    if (bucket && keyId && privateKeyEnvVar) {
         try {
-            if ((config.settings.keyId as IObject).encrypted) keyId = await utils.decrypt(keyId);
-            if ((config.settings.privateKey as IObject).encrypted) privateKey = await utils.decrypt(privateKey);
-            const storage = new Storage({ bucket, keyId, privateKey }); 
+            const storage = new Storage(config.settings as IObject); 
             await storage.connect();
             log.info('GCP Storage: Client connection created.');
             return storage;
@@ -32,155 +31,154 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     else log.error('GCP Storage: One or more required parameters (bucket, keyId, privateKey) have not been set.');
 }
 
-class Storage implements IStorage {
-    private config: ContextExtensionConfig;
-    private token: string;
-    private tokenType: string;
-    private tokenLife: number;
+class Storage {
+    private config: IObject;
+    private baseUrl: string;
+    private uploadUrl: string;
+    private token = '';
+    private tokenType = '';
+    private tokenLife = 0;
 
-    constructor(config: ContextExtensionConfig) {
+    constructor(config: IObject) {
         this.config = config;
+        this.baseUrl = `https://storage.googleapis.com/storage/v1/b/${this.config.bucket}`;
+        this.uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${this.config.bucket}`;
     }
 
     async connect () : Promise<void> {
-        const privateKey = await importPrivateKey(this.config.privateKey);
-        const date = Date.now() / 1000;
+        try {
+            const keyData = decode(new TextEncoder().encode(Deno.env.get(this.config.privateKeyEnvVar as string)));
+            const privateKey = await crypto.subtle.importKey(
+                "pkcs8",
+                keyData,
+                {
+                    name: "RSASSA-PKCS1-v1_5",
+                    hash: "SHA-256",
+                },
+                true,
+                ["sign"],
+            );
+            const date = Math.floor(Date.now() / 1000);
+            const header:Header = {
+                "alg": "RS256",
+                "typ": "JWT",
+                "kid": this.config.keyId
+            };
+            const claimSet:Payload = {
+                "iss": "19841005803-compute@developer.gserviceaccount.com",
+                "scope": "https://www.googleapis.com/auth/devstorage.full_control",
+                "aud": "https://oauth2.googleapis.com/token",
+                "exp": date + 3600,
+                "iat": date
+            };
+            const jwt = await create(header, claimSet, privateKey);
 
-        const header = {
-            "alg": "RS256",
-            "typ": "JWT",
-            "kid": this.config.keyId
-        };
-    
-        const claimSet = {
-            "iss": "19841005803-compute@developer.gserviceaccount.com",
-            "scope": "https://www.googleapis.com/auth/devstorage.full_control",
-            "aud": "https://oauth2.googleapis.com/token",
-            "exp": date + 3600,
-            "iat": date
-        }; 
-        
-        const jwt = await create(header, claimSet, privateKey);
+            const response = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: [['Content-Type', 'application/x-www-form-urlencoded']],
+                body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
+            });
 
-        let response = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: [['Content-Type', 'application/x-www-form-urlencoded']],
-            body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
-        });
-    
-        let json = await response.json();
+            const json = await response.json();
+            if (json.error) throw json.error.code + ':' + json.error.message;
 
-        if (json.error) {
-            throw json.error.code + ':' + json.error.message;
+            this.token = json['access_token'];
+            this.tokenLife = json['expires_in'];
+            this.tokenType = json['token_type'];
+
+            setTimeout(async () => { await this.connect() }, (this.tokenLife - 300) * 1000);
         }
-    
-        this.token = json['access_token'];
-        this.tokenLife = json['expires_in'];
-        this.tokenType = json['token_type'];
-
-        setTimeout(async () => { await this.connect() }, (this.tokenLife - 300) * 1000);
+        catch (e) {
+            console.log(e.message);
+            throw e;
+        }
     }
 
     async createFolder (name:string) : Promise<void> {
-        const body = {
-            name,
+        try {
+            const response = await fetch(
+                `${this.baseUrl}/folders?recursive=true`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `${this.tokenType} ${this.token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name
+                    })
+                }
+            )
+            const json = await response.json();
+            if (json.error) throw json.error.code + ':' + json.error.message;
+            return json;
         }
-
-        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/folders?recursive=true`, {
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `${this.tokenType} ${this.token}`
-            },
-            method: 'POST',
-            body: JSON.stringify(body)
-        })
-
-        const json = await response.json();
-
-        if (json.error) {
-            throw json.error.code + ':' + json.error.message;
+        catch (e) {
+            console.log(e.message);
+            throw e;
         }
-        
-        return json;
     }
 
-    async putItem (params:IObject) : Promise<void> {
-        const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${this.config.bucket}/o?name=${params.name}&uploadType=media`, {
-            headers: {
-                'Content-Type': params.contentType,
-                'Content-Length': params.content.length,
-                Authorization: `${this.tokenType} ${this.token}`
-            },
-            method: 'POST',
-            body: params.content
-        })
-    
-        const json = await response.json();
-
-        if (json.error) {
-            throw json.error.code + ':' + json.error.message;
+    async addItem (params:IObject) : Promise<void> {
+        try {
+            const response = await fetch(
+                `${this.uploadUrl}/o?name=${params.name}&uploadType=media`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': params.contentType as string,
+                        'Content-Length': (params.content as ArrayBuffer).byteLength.toString(),
+                        'Authorization': `${this.tokenType} ${this.token}`
+                    },
+                    body: params.content as BodyInit
+                }
+            )
+            const json = await response.json();
+            if (json.error) throw json.error.code + ':' + json.error.message;
+        }
+        catch (e) {
+            console.log(e.message);
+            throw e;
         }
     }
 
     async getItem (path:string) : Promise<Uint8Array> {
-        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/o/${encodeURIComponent(path)}?alt=media`, {
-            headers: {
-                Authorization: `${this.tokenType} ${this.token}`
-            },
-            method: 'GET'
-        })
-        console.log(response)
-        const content = await response.arrayBuffer() as Uint8Array;
-        if (response.ok) return content;
-        throw response.status + ':' + response.statusText;
+        try {
+            const response = await fetch(
+                `${this.baseUrl}/o/${encodeURIComponent(path)}?alt=media`,
+                {
+                    method: 'GET',
+                    headers: {
+                        Authorization: `${this.tokenType} ${this.token}`
+                    }
+                }
+            )
+            const content = await response.arrayBuffer() as Uint8Array;
+            if (response.ok) return content;
+            throw response.status + ':' + response.statusText;
+        }
+        catch (e) {
+            console.log(e.message);
+            throw e;
+        }
     }
 
     async deleteItem (path:string) : Promise<void> {
-        const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${this.config.bucket}/o/${encodeURIComponent(path)}`, {
-            headers: {
-                Authorization: `${this.tokenType} ${this.token}`
-            },
-            method: 'DELETE'
-        })
-        if (!response.ok) throw response.status + ':' + response.statusText;
+        try {
+            const response = await fetch(
+                `${this.baseUrl}/o/${encodeURIComponent(path)}`,
+                {
+                    method: 'DELETE',
+                    headers: {
+                        Authorization: `${this.tokenType} ${this.token}`
+                    }
+                }
+            )
+            if (!response.ok) throw response.status + ':' + response.statusText;
+        }
+        catch (e) {
+            console.log(e.message);
+            throw e;
+        }
     }
-}
-
-/*
-Import a PEM encoded RSA private key, to use for RSA-PSS signing.
-Takes a string containing the PEM encoded key, and returns a Promise
-that will resolve to a CryptoKey representing the private key.
-*/
-async function importPrivateKey(pem:string) {
-    // fetch the part of the PEM string between header and footer
-    const pemHeader = "-----BEGIN PRIVATE KEY-----";
-    const pemFooter = "-----END PRIVATE KEY-----";
-    const pemContents = pem.substring(
-        pemHeader.length,
-        pem.length - pemFooter.length - 1,
-    );
-    // base64 decode the string to get the binary data
-    const binaryDerString = window.atob(pemContents);
-    // convert from a binary string to an ArrayBuffer
-    const binaryDer = str2ab(binaryDerString);
-      
-    return await window.crypto.subtle.importKey(
-        "pkcs8",
-        binaryDer,
-        {
-            name: "RSASSA-PKCS1-v1_5",
-            hash: "SHA-256",
-        },
-        true,
-        ["sign"],
-    );
-}
-
-function str2ab(str:string) {
-    const buf = new ArrayBuffer(str.length);
-    const bufView = new Uint8Array(buf);
-    for (let i = 0, strLen = str.length; i < strLen; i++) {
-      bufView[i] = str.charCodeAt(i);
-    }
-    return buf;
 }

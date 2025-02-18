@@ -3,17 +3,15 @@
         https://developer.adobe.com/document-services/docs/overview/pdf-services-api/
 */
 
-import type { ContextExtensionConfig, IUtils, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<object|void> {
-    let clientId:string|IObject, clientSecret:string|IObject;
-    clientId = (config.settings.clientId && config.settings.clientId.value) ? config.settings.clientId.value : null;
-    clientSecret = (config.settings.clientSecret && config.settings.clientSecret.value) ? config.settings.clientSecret.value : null;
+export async function getInstance (config: IObject) : Promise<Adobe|undefined> {
+    let clientId = '', clientSecret = '';
+    clientId = (config.settings as IObject).clientId as string;
+    clientSecret = (config.settings as IObject).clientSecret as string;
     if (clientId && clientSecret) {
         try {
-            if ((config.settings.clientId as IObject).encrypted) clientId = await utils.decrypt(clientId);
-            if ((config.settings.clientSecret as IObject).encrypted) clientSecret = await utils.decrypt(clientSecret);
             const adobe = new Adobe({ clientId, clientSecret }); 
             await adobe.connect();
             log.info('Adobe: Client connection created.');
@@ -27,28 +25,27 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
 }
 
 class Adobe {
-    private config: ContextExtensionConfig;
-    private token: string;
-    private tokenType: string;
-    private tokenLife: number;
+    private config: IObject;
+    private baseUrl: string;
+    private token = '';
+    private tokenType = '';
+    private tokenLife = 0;
 
-    constructor(config: ContextExtensionConfig) {
+    constructor(config: IObject) {
         this.config = config;
+        this.baseUrl = 'https://pdf-services.adobe.io';
     }
 
     async connect () : Promise<void> {
-        let response = await fetch('https://pdf-services.adobe.io/token', {
+        const response = await fetch(`${this.baseUrl}/token`, {
             method: 'POST',
             headers: [['Content-Type', 'application/x-www-form-urlencoded']],
-            body: `client_id=${encodeURIComponent(this.config.clientId)}&client_secret=${encodeURIComponent(this.config.clientSecret)}`
+            body: `client_id=${encodeURIComponent(this.config.clientId as string)}&client_secret=${encodeURIComponent(this.config.clientSecret as string)}`
         });
-    
-        let json = await response.json();
 
-        if (json.error) {
-            throw json.error.code + ':' + json.error.message;
-        }
-    
+        const json = await response.json();
+        if (json.error) throw json.error.code + ':' + json.error.message;
+
         this.token = json['access_token'];
         this.tokenLife = json['expires_in'];
         this.tokenType = json['token_type'];
@@ -56,60 +53,97 @@ class Adobe {
         setTimeout(async () => { await this.connect() }, (this.tokenLife - 300) * 1000);
     }
 
-    async createDocumentGenerationJob (config:IObject) : Promise<void> {
-        let response = await fetch(`https://pdf-services.adobe.io/assets`, {
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.config.clientId,
-                Authorization: `${this.tokenType} ${this.token}`
-            },
+    async createDocumentGenerationJob (config:IObject) : Promise<IObject|void> {
+        let response = await fetch(`${this.baseUrl}/assets`, {
             method: 'POST',
+            headers: {
+                'Authorization': `${this.tokenType} ${this.token}`,
+                'Content-Type': 'application/json',
+                'x-api-key': this.config.clientId as string
+            },
             body: JSON.stringify({
-                "mediaType": config.document.mediaType
+                "mediaType": (config.document as IObject).mediaType
             })
         })
-        let json = await response.json();
-        if (json.error) throw json.error.code + ':' + json.error.message;
+
+        const json = await response.json();
+        if (json.error) throw 'Getting assetID failed: ' + json.error.code + ':' + json.error.message;
         
         const uploadUri = json.uploadUri;
-
-        response = await fetch(uploadUri, {
-            headers: {
-                'Content-Type': config.document.mediaType,
-            },
-            method: 'PUT',
-            body: config.document.content
-        })
-        json = await response.json();
-        if (json.error) throw json.error.code + ':' + json.error.message;
-
         const assetID = json.assetID;
 
-        response = await fetch(`https://pdf-services.adobe.io/operation/documentgeneration`, {
+        response = await fetch(uploadUri, {
+            method: 'PUT',
             headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': this.config.clientId,
-                Authorization: `${this.tokenType} ${this.token}`
+                'Content-Type': (config.document as IObject).mediaType as string,
             },
+            body: (config.document as IObject).content as BodyInit
+        })
+
+        response = await fetch(`${this.baseUrl}/operation/documentgeneration`, {
             method: 'POST',
+            headers: {
+                'Authorization': `${this.tokenType} ${this.token}`,
+                'Content-Type': 'application/json',
+                'x-api-key': this.config.clientId as string,
+            },
             body: JSON.stringify({
                 "assetID": assetID,
-                "outputFormat": "pdf",
+                "outputFormat": config.outputFormat || "pdf",
                 "jsonDataForMerge": config.mergeData || {},
-                "notifiers": [
+                "notifiers": config.callback ? [
                     {
                         "type": "CALLBACK",
                         "data": {
-                            "url": config.callback.url,
-                            "headers": config.callback.headers || {}
+                            "url": (config.callback as IObject).url,
+                            "headers":  (config.callback as IObject).headers || {}
                         }
                     }
-                ]
+                ] : []
             })
         })
-        json = await response.json();
-        if (json.error) throw json.error.code + ':' + json.error.message;
 
-        return json;
+        const location = response.headers.get('location') as string;
+        if (!location) {
+            const json = await response.json();
+            throw 'Document generation failed: ' + json.error.code + ':' + json.error.message;
+        }
+   
+        if (!config.callback) {
+            let retry = 1;
+            while (retry <= 30) {
+                log.info('Adobe Document Generation Attempt:', retry)
+                await delay(1000);
+                const response = await fetch(location, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `${this.tokenType} ${this.token}`,
+                        'x-api-key': this.config.clientId as string,
+                    }
+                });
+        
+                const json = await response.json();
+                if (json.error) throw json.error.code + ':' + json.error.message;
+                
+                if (json.status == 'done') {
+                    log.info('Adobe Job Completion', json.asset);
+                    const response = await fetch(json.asset.downloadUri, {
+                        method: 'GET'
+                    });
+
+                    return { document: await response.arrayBuffer() }
+                }
+
+                ++retry;
+            }
+            throw 'Adobe document generation job not completed in time'
+        }
+        else {
+            return json;
+        }
     }
+}
+
+function delay(time: number) {
+    return new Promise(resolve => setTimeout(resolve, time));
 }

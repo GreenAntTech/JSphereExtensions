@@ -1,15 +1,14 @@
-import type { ContextExtensionConfig, IUtils, IMail, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { IMail, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import * as Base64 from 'https://deno.land/std@0.119.0/encoding/base64.ts';
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<IMail|void> {
+export function getInstance (config: IObject) : MailClient|void {
     let smtpHost = '', smtpUsername = '', smtpPassword = '';
-    smtpHost = config.settings.smtpHost as string;
-    smtpUsername = (config.settings.smtpUsername as IObject).value as string;
-    smtpPassword = (config.settings.smtpPassword as IObject).value as string;
+    smtpHost = (config.settings as IObject).smtpHost as string;
+    smtpUsername = (config.settings as IObject).smtpUsername as string;
+    smtpPassword = (config.settings as IObject).smtpPassword as string;
     if (smtpHost && smtpUsername && smtpPassword) {
         try {
-            if ((config.settings.smtpPassword as IObject).encrypted) smtpPassword = await utils.decrypt(smtpPassword);
             log.info('SMTP: Client connection created.');
             return new MailClient(smtpHost, smtpUsername, smtpPassword);
         }
@@ -20,7 +19,7 @@ export async function getInstance (config: ContextExtensionConfig, utils: IUtils
     else log.error('SMTP: One or more required parameters (smtpHost, smtpUsername, smtpPassword) have not been set.');
 }
 
-class MailClient implements IMail {
+class MailClient {
     private host = '';
     private username = '';
     private password = '';
@@ -33,18 +32,17 @@ class MailClient implements IMail {
         this.authorization = Base64.encode(this.username + ':' + this.password);
     }
 
-    send = async (config: IObject) : Promise<number> => {
+    send = async (config: IObject) : Promise<void> => {
         const data = new FormData();
         for (const key in config) {
             data.append(key, config[key] as string);
         }
-        const response = await fetch(this.host, {
+        await fetch(this.host, {
             headers: {
                 Authorization: `Basic ${this.authorization}`
             },
             method: 'POST',
             body: data
         })
-        return response.status;
     }
 }

@@ -1,22 +1,21 @@
-import type { ContextExtensionConfig, IUtils, ICache, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { ICache, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 import { connect, Redis } from "https://deno.land/x/redis@v0.29.2/mod.ts";
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<ICache|void> {
+export async function getInstance (config: IObject) : Promise<ICache|void> {
     let redisHost = '', redisPort = 0, redisPassword = '';
-    redisHost = config.settings.redisHost as string;
-    redisPort = config.settings.redisPort as number || 18386;
-    redisPassword = (config.settings.redisPassword as IObject).value as string;
+    redisHost = (config.settings as IObject).redisHost as string;
+    redisPort = (config.settings as IObject).redisPort as number || 18386;
+    redisPassword = (config.settings as IObject).redisPassword as string;
     if (redisHost && redisPassword) {
         try {
-            if ((config.settings.redisPassword as IObject).encrypted) redisPassword = await utils.decrypt(redisPassword);
             const client = await connect({
                 hostname: redisHost,
                 port: redisPort,
                 password: redisPassword,
             });
             log.info('Redis: Client connection created.');
-            return new Cache(client, config.domain);
+            return new Cache(client, config.domain as string);
         }
         catch(e) {
             log.error(`Redis: Client connection failed.`, e.message);

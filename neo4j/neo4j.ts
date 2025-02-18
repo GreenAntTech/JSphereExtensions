@@ -1,22 +1,21 @@
-import type { ContextExtensionConfig, IUtils, IDataStore, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.type.ts";
+import type { IDataStore, IObject } from "https://raw.githubusercontent.com/GreenAntTech/JSphere/main/server.d.ts";
 import type { Driver, Session, Transaction, Result, QueryResult } from "https://deno.land/x/neo4j_lite_client@4.4.1-preview2/mod.ts";    
 import neo4j from "https://deno.land/x/neo4j_lite_client@4.4.1-preview2/mod.ts";    
 import * as log from "https://deno.land/std@0.179.0/log/mod.ts";
 
 export type { Result, Session, QueryResult };
 
-export async function getInstance (config: ContextExtensionConfig, utils: IUtils) : Promise<IDataStore|void> {
+export async function getInstance (config: IObject) : Promise<DataStore|void> {
     let hostname = '', database = '', username = '', password = '';
-    hostname = config.settings.dbHostname as string;
-    database = config.settings.dbDatabase as string;
-    username = config.settings.dbUsername as string;
-    password = (config.settings.dbPassword as IObject).value as string;
+    hostname = (config.settings as IObject).dbHostname as string;
+    database = (config.settings as IObject).dbDatabase as string;
+    username = (config.settings as IObject).dbUsername as string;
+    password = (config.settings as IObject).dbPassword as string;
     if (hostname && database && username && password) {
         try {
-            if ((config.settings.dbPassword as IObject).encrypted) password = await utils.decrypt(password);
             const authToken = neo4j.auth.basic(username, password);
             const driver = neo4j.driver(hostname, authToken);
-            driver.verifyConnectivity();
+            await driver.verifyConnectivity();
             log.info('neo4j: Client connection created.');
             return new DataStore(driver, database);
         }
